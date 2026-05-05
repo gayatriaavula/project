@@ -76,7 +76,10 @@ jobs:
       - name: Terraform plan
         id: plan
         working-directory: terraform
-        run: terraform plan -out=tfplan -no-color 2>&1 | tee plan.txt
+        shell: bash
+        run: |
+          set -o pipefail
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan.txt
 
       - name: Post plan to PR
         if: github.event_name == 'pull_request'
