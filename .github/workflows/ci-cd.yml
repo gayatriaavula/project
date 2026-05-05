@@ -100,14 +100,23 @@ jobs:
               body: `## Terraform Plan\n\`\`\`\n${truncated}\n\`\`\``
             });
 
+      - name: Debug plan output
+        if: always()
+        working-directory: terraform
+        run: |
+          echo "=== Files in terraform dir ==="
+          ls -la
+          echo "=== tfplan exists? ==="
+          test -f tfplan && echo "YES - tfplan found" || echo "NO - tfplan missing"
+
       - name: Terraform apply
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
         working-directory: terraform
         run: terraform apply -auto-approve tfplan
 
       - name: Capture terraform outputs
         id: tf_outputs
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
         working-directory: terraform
         run: |
           echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
