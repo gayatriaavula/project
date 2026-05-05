@@ -76,17 +76,21 @@ jobs:
       - name: Terraform plan
         id: plan
         working-directory: terraform
-        shell: bash
-        run: |
-          set -o pipefail
-          terraform plan -out=tfplan -no-color 2>&1 | tee plan.txt
+        run: terraform plan -out=tfplan -no-color
 
       - name: Post plan to PR
+        if: github.event_name == 'pull_request'
+        working-directory: terraform
+        run: terraform show -no-color tfplan > plan.txt
+        continue-on-error: true
+
+      - name: Comment plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('terraform/plan.txt')) process.exit(0);
             const plan = fs.readFileSync('terraform/plan.txt', 'utf8');
             const truncated = plan.length > 60000 ? plan.slice(-60000) : plan;
             github.rest.issues.createComment({
