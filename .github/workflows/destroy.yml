@@ -64,13 +64,15 @@ jobs:
             aws elbv2 delete-load-balancer --load-balancer-arn $arn
             echo "Deleted ALB: $arn"
           done
-          sleep 15
+          echo "Waiting 90s for ALBs to fully delete..."
+          sleep 90
 
       - name: Delete target groups
         continue-on-error: true
         run: |
-          for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output text); do
+          for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[?LoadBalancerArns==`[]`].TargetGroupArn' --output text); do
             aws elbv2 delete-target-group --target-group-arn $arn
+            echo "Deleted target group: $arn"
           done
 
       - name: Delete RDS instance
