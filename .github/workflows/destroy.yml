@@ -1,0 +1,177 @@
+name: Destroy and Recreate AWS Infrastructure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  destroy:
+    name: Destroy All AWS Resources
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: Clear stale lock
+        continue-on-error: true
+        env:
+          BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: aws s3 rm "s3://${BUCKET}/app/terraform.tfstate.tflock" || true
+
+      - name: Terraform destroy
+        continue-on-error: true
+        working-directory: terraform
+        run: terraform destroy -auto-approve -lock=false
+
+      - name: Delete ECS services and clusters
+        continue-on-error: true
+        run: |
+          for cluster in $(aws ecs list-clusters --query 'clusterArns[]' --output text); do
+            for service in $(aws ecs list-services --cluster $cluster --query 'serviceArns[]' --output text); do
+              aws ecs update-service --cluster $cluster --service $service --desired-count 0
+              aws ecs delete-service --cluster $cluster --service $service --force
+            done
+            aws ecs delete-cluster --cluster $cluster
+          done
+
+      - name: Delete load balancers
+        continue-on-error: true
+        run: |
+          for arn in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
+            aws elbv2 delete-load-balancer --load-balancer-arn $arn
+            echo "Deleted ALB: $arn"
+          done
+          sleep 15
+
+      - name: Delete target groups
+        continue-on-error: true
+        run: |
+          for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output text); do
+            aws elbv2 delete-target-group --target-group-arn $arn
+          done
+
+      - name: Delete RDS instance
+        continue-on-error: true
+        run: |
+          for db in $(aws rds describe-db-instances --query 'DBInstances[].DBInstanceIdentifier' --output text); do
+            aws rds delete-db-instance --db-instance-identifier $db --skip-final-snapshot --delete-automated-backups
+            echo "Deleting RDS: $db (takes 5-10 min)"
+          done
+
+      - name: Delete ECR repositories
+        continue-on-error: true
+        run: |
+          for repo in $(aws ecr describe-repositories --query 'repositories[].repositoryName' --output text); do
+            aws ecr delete-repository --repository-name $repo --force
+          done
+
+      - name: Empty and delete S3 frontend bucket
+        continue-on-error: true
+        run: |
+          for bucket in $(aws s3api list-buckets --query 'Buckets[?contains(Name, `frontend`)].Name' --output text); do
+            aws s3 rm s3://$bucket --recursive
+            aws s3api delete-bucket --bucket $bucket
+            echo "Deleted bucket: $bucket"
+          done
+
+      - name: Delete NAT gateways and wait
+        continue-on-error: true
+        run: |
+          for natgw in $(aws ec2 describe-nat-gateways --filter Name=state,Values=available --query 'NatGateways[].NatGatewayId' --output text); do
+            aws ec2 delete-nat-gateway --nat-gateway-id $natgw
+            echo "Deleting NAT Gateway: $natgw"
+          done
+          echo "Waiting 60s for NAT gateways to delete..."
+          sleep 60
+
+      - name: Release Elastic IPs
+        continue-on-error: true
+        run: |
+          for alloc in $(aws ec2 describe-addresses --query 'Addresses[?AssociationId==null].AllocationId' --output text); do
+            aws ec2 release-address --allocation-id $alloc
+            echo "Released EIP: $alloc"
+          done
+
+      - name: Delete VPCs and networking
+        continue-on-error: true
+        run: |
+          for vpc in $(aws ec2 describe-vpcs --filters Name=isDefault,Values=false --query 'Vpcs[].VpcId' --output text); do
+            echo "Cleaning VPC: $vpc"
+            # Delete subnets
+            for subnet in $(aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpc --query 'Subnets[].SubnetId' --output text); do
+              aws ec2 delete-subnet --subnet-id $subnet
+            done
+            # Delete route tables
+            for rt in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$vpc --query 'RouteTables[?Associations[?Main==`false`]].RouteTableId' --output text); do
+              aws ec2 delete-route-table --route-table-id $rt
+            done
+            # Detach and delete internet gateways
+            for igw in $(aws ec2 describe-internet-gateways --filters Name=attachment.vpc-id,Values=$vpc --query 'InternetGateways[].InternetGatewayId' --output text); do
+              aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc
+              aws ec2 delete-internet-gateway --internet-gateway-id $igw
+            done
+            # Delete security groups (non-default)
+            for sg in $(aws ec2 describe-security-groups --filters Name=vpc-id,Values=$vpc --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
+              aws ec2 delete-security-group --group-id $sg || true
+            done
+            # Delete VPC
+            aws ec2 delete-vpc --vpc-id $vpc
+            echo "Deleted VPC: $vpc"
+          done
+
+      - name: Delete CloudWatch log groups
+        continue-on-error: true
+        run: |
+          for lg in $(aws logs describe-log-groups --query 'logGroups[?contains(logGroupName, `sample-app`)].logGroupName' --output text); do
+            aws logs delete-log-group --log-group-name $lg
+          done
+
+      - name: Delete IAM roles
+        continue-on-error: true
+        run: |
+          for role in $(aws iam list-roles --query 'Roles[?contains(RoleName, `sample-app`)].RoleName' --output text); do
+            for policy in $(aws iam list-attached-role-policies --role-name $role --query 'AttachedPolicies[].PolicyArn' --output text); do
+              aws iam detach-role-policy --role-name $role --policy-arn $policy
+            done
+            aws iam delete-role --role-name $role
+            echo "Deleted IAM role: $role"
+          done
+
+      - name: Clear Terraform state
+        continue-on-error: true
+        env:
+          BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          aws s3 rm "s3://${BUCKET}/app/terraform.tfstate" || true
+          aws s3 rm "s3://${BUCKET}/app/terraform.tfstate.tflock" || true
+          echo "Terraform state cleared"
+
+      - name: Summary
+        run: |
+          echo "Destroy complete!"
+          echo "All AWS resources have been removed."
+          echo ""
+          echo "Now go to Actions and run the CI/CD pipeline to deploy fresh."
