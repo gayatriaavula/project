@@ -57,6 +57,26 @@ jobs:
             aws ecs delete-cluster --cluster $cluster
           done
 
+      - name: Delete ALB listeners first
+        continue-on-error: true
+        run: |
+          for alb in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
+            for listener in $(aws elbv2 describe-listeners --load-balancer-arn $alb --query 'Listeners[].ListenerArn' --output text); do
+              aws elbv2 delete-listener --listener-arn $listener
+              echo "Deleted listener: $listener"
+            done
+          done
+          sleep 10
+
+      - name: Delete target groups
+        continue-on-error: true
+        run: |
+          for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output text); do
+            aws elbv2 delete-target-group --target-group-arn $arn
+            echo "Deleted target group: $arn"
+          done
+          sleep 10
+
       - name: Delete load balancers
         continue-on-error: true
         run: |
@@ -66,14 +86,6 @@ jobs:
           done
           echo "Waiting 90s for ALBs to fully delete..."
           sleep 90
-
-      - name: Delete target groups
-        continue-on-error: true
-        run: |
-          for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[?LoadBalancerArns==`[]`].TargetGroupArn' --output text); do
-            aws elbv2 delete-target-group --target-group-arn $arn
-            echo "Deleted target group: $arn"
-          done
 
       - name: Delete RDS instance
         continue-on-error: true
