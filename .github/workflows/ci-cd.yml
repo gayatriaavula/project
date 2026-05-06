@@ -66,7 +66,7 @@ jobs:
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=app/terraform.tfstate" \
             -backend-config="region=${{ secrets.AWS_REGION }}" \
-            -backend-config="dynamodb_table=terraform-state-lock" \
+            -backend-config="use_lockfile=true" \
             -backend-config="encrypt=true"
 
       - name: Force unlock stale state lock
@@ -74,10 +74,7 @@ jobs:
         env:
           BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
-          aws dynamodb delete-item \
-            --table-name terraform-state-lock \
-            --key "{\"LockID\": {\"S\": \"${BUCKET}/app/terraform.tfstate\"}}"
-          echo "State lock cleared"
+          aws s3 rm "s3://${BUCKET}/app/terraform.tfstate.tflock" || echo "No lock file found"
 
       - name: Terraform validate
         working-directory: terraform
