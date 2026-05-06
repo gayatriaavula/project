@@ -82,6 +82,16 @@ jobs:
             aws rds delete-db-instance --db-instance-identifier $db --skip-final-snapshot --delete-automated-backups
             echo "Deleting RDS: $db (takes 5-10 min)"
           done
+          echo "Waiting 300s for RDS to delete..."
+          sleep 300
+
+      - name: Delete RDS subnet groups
+        continue-on-error: true
+        run: |
+          for sg in $(aws rds describe-db-subnet-groups --query 'DBSubnetGroups[].DBSubnetGroupName' --output text); do
+            aws rds delete-db-subnet-group --db-subnet-group-name $sg
+            echo "Deleted RDS subnet group: $sg"
+          done
 
       - name: Delete ECR repositories
         continue-on-error: true
