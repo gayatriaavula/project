@@ -141,9 +141,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Resolve deployment variables
+        id: vars
+        env:
+          TF_ECR_URL: ${{ needs.terraform.outputs.ecr_url }}
+          TF_ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
+          TF_ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+          TF_BACKEND_URL: ${{ needs.terraform.outputs.backend_url }}
+          TF_FRONTEND_BUCKET: ${{ needs.terraform.outputs.frontend_bucket }}
+          TF_FRONTEND_URL: ${{ needs.terraform.outputs.frontend_url }}
+        run: |
+          ECR_URL=${TF_ECR_URL:-$(aws ecr describe-repositories --repository-names sample-app-backend --query 'repositories[0].repositoryUri' --output text)}
+          ECS_CLUSTER=${TF_ECS_CLUSTER:-$(aws ecs list-clusters --query 'clusterArns[0]' --output text | xargs aws ecs describe-clusters --clusters --query 'clusters[0].clusterName' --output text)}
+          ECS_SERVICE=${TF_ECS_SERVICE:-$(aws ecs list-services --cluster $ECS_CLUSTER --query 'serviceArns[0]' --output text | xargs -I{} aws ecs describe-services --cluster $ECS_CLUSTER --services {} --query 'services[0].serviceName' --output text)}
+          BACKEND_URL=${TF_BACKEND_URL:-$(aws elbv2 describe-load-balancers --names sample-app-alb --query 'LoadBalancers[0].DNSName' --output text)}
+          FRONTEND_BUCKET=${TF_FRONTEND_BUCKET:-$(aws s3api list-buckets --query 'Buckets[?contains(Name,`frontend`)].Name' --output text | awk '{print $1}')}
+          FRONTEND_URL=${TF_FRONTEND_URL:-"http://${FRONTEND_BUCKET}.s3-website-${AWS_REGION}.amazonaws.com"}
+          echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$ECS_CLUSTER" >> $GITHUB_OUTPUT
+          echo "ecs_service=$ECS_SERVICE" >> $GITHUB_OUTPUT
+          echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
+          echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+          echo "--- Resolved values ---"
+          echo "ECR:     $ECR_URL"
+          echo "Cluster: $ECS_CLUSTER"
+          echo "Service: $ECS_SERVICE"
+          echo "Backend: $BACKEND_URL"
+          echo "Bucket:  $FRONTEND_BUCKET"
+
       - name: Build and push backend image
         env:
-          ECR_URL: ${{ needs.terraform.outputs.ecr_url }}
+          ECR_URL: ${{ steps.vars.outputs.ecr_url }}
         run: |
           ECR_REGISTRY=$(echo $ECR_URL | cut -d'/' -f1)
           aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
@@ -153,25 +182,27 @@ jobs:
 
       - name: Force ECS deployment and wait
         env:
-          ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
-          ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
+          ECS_CLUSTER: ${{ steps.vars.outputs.ecs_cluster }}
+          ECS_SERVICE: ${{ steps.vars.outputs.ecs_service }}
         run: |
           aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment
           aws ecs wait services-stable --cluster $ECS_CLUSTER --services $ECS_SERVICE
 
       - name: Deploy frontend to S3
         env:
-          BACKEND_URL: ${{ needs.terraform.outputs.backend_url }}
-          FRONTEND_BUCKET: ${{ needs.terraform.outputs.frontend_bucket }}
+          BACKEND_URL: ${{ steps.vars.outputs.backend_url }}
+          FRONTEND_BUCKET: ${{ steps.vars.outputs.frontend_bucket }}
         run: |
           sed -i "s|REPLACE_WITH_BACKEND_API_URL|http://$BACKEND_URL|g" frontend/app.js
           aws s3 sync ./frontend s3://$FRONTEND_BUCKET --delete
 
       - name: Deployment summary
         env:
-          FRONTEND_URL: ${{ needs.terraform.outputs.frontend_url }}
-          BACKEND_URL: ${{ needs.terraform.outputs.backend_url }}
+          FRONTEND_URL: ${{ steps.vars.outputs.frontend_url }}
+          BACKEND_URL: ${{ steps.vars.outputs.backend_url }}
         run: |
+          echo "================================"
           echo "Deployment complete!"
           echo "Frontend: $FRONTEND_URL"
           echo "Backend:  http://$BACKEND_URL"
+          echo "================================"
