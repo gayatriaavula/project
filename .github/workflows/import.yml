@@ -1,0 +1,228 @@
+name: Import Existing AWS Resources into Terraform State
+
+on:
+  workflow_dispatch:
+
+jobs:
+  import:
+    name: Import AWS Resources
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: Clear stale lock
+        continue-on-error: true
+        env:
+          BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: aws s3 rm "s3://${BUCKET}/app/terraform.tfstate.tflock" || true
+
+      # ── Fix: delete target group with wrong target_type ──────────────────
+      - name: Delete wrong target group (target_type=instance)
+        continue-on-error: true
+        run: |
+          TG_ARN=$(aws elbv2 describe-target-groups \
+            --names sample-app-backend-tg \
+            --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null)
+          if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
+            # Delete listener first
+            for ALB in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
+              for L in $(aws elbv2 describe-listeners --load-balancer-arn $ALB --query 'Listeners[].ListenerArn' --output text); do
+                aws elbv2 delete-listener --listener-arn $L && echo "Deleted listener $L"
+              done
+            done
+            sleep 5
+            aws elbv2 delete-target-group --target-group-arn $TG_ARN && echo "Deleted target group"
+          fi
+
+      # ── Release unused EIPs ───────────────────────────────────────────────
+      - name: Release unassociated Elastic IPs
+        continue-on-error: true
+        run: |
+          for ALLOC in $(aws ec2 describe-addresses \
+            --query 'Addresses[?AssociationId==null].AllocationId' --output text); do
+            aws ec2 release-address --allocation-id $ALLOC
+            echo "Released EIP: $ALLOC"
+          done
+
+      # ── Import VPC ────────────────────────────────────────────────────────
+      - name: Import VPC
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          ID=$(aws ec2 describe-vpcs \
+            --filters "Name=cidr,Values=10.0.0.0/16" "Name=isDefault,Values=false" \
+            --query 'Vpcs[0].VpcId' --output text)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_vpc.main $ID && echo "Imported VPC: $ID"
+
+      # ── Import Public Subnets ─────────────────────────────────────────────
+      - name: Import public subnets
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          VPC=$(aws ec2 describe-vpcs \
+            --filters "Name=cidr,Values=10.0.0.0/16" "Name=isDefault,Values=false" \
+            --query 'Vpcs[0].VpcId' --output text)
+          SUBNETS=($(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC" "Name=cidr-block,Values=10.0.0.0/24,10.0.1.0/24" \
+            --query 'Subnets | sort_by(@, &CidrBlock)[].SubnetId' --output text))
+          [ -n "${SUBNETS[0]}" ] && terraform import -lock=false 'aws_subnet.public[0]' ${SUBNETS[0]} && echo "Imported public subnet 0"
+          [ -n "${SUBNETS[1]}" ] && terraform import -lock=false 'aws_subnet.public[1]' ${SUBNETS[1]} && echo "Imported public subnet 1"
+
+      # ── Import Private Subnets ────────────────────────────────────────────
+      - name: Import private subnets
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          VPC=$(aws ec2 describe-vpcs \
+            --filters "Name=cidr,Values=10.0.0.0/16" "Name=isDefault,Values=false" \
+            --query 'Vpcs[0].VpcId' --output text)
+          SUBNETS=($(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC" "Name=cidr-block,Values=10.0.2.0/24,10.0.3.0/24" \
+            --query 'Subnets | sort_by(@, &CidrBlock)[].SubnetId' --output text))
+          [ -n "${SUBNETS[0]}" ] && terraform import -lock=false 'aws_subnet.private[0]' ${SUBNETS[0]} && echo "Imported private subnet 0"
+          [ -n "${SUBNETS[1]}" ] && terraform import -lock=false 'aws_subnet.private[1]' ${SUBNETS[1]} && echo "Imported private subnet 1"
+
+      # ── Import Internet Gateway ───────────────────────────────────────────
+      - name: Import Internet Gateway
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          VPC=$(aws ec2 describe-vpcs \
+            --filters "Name=cidr,Values=10.0.0.0/16" "Name=isDefault,Values=false" \
+            --query 'Vpcs[0].VpcId' --output text)
+          ID=$(aws ec2 describe-internet-gateways \
+            --filters "Name=attachment.vpc-id,Values=$VPC" \
+            --query 'InternetGateways[0].InternetGatewayId' --output text)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_internet_gateway.main $ID && echo "Imported IGW: $ID"
+
+      # ── Import NAT Gateway ────────────────────────────────────────────────
+      - name: Import NAT Gateway
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          ID=$(aws ec2 describe-nat-gateways \
+            --filter "Name=state,Values=available" \
+            --query 'NatGateways[0].NatGatewayId' --output text)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_nat_gateway.main $ID && echo "Imported NAT GW: $ID"
+
+      # ── Import Elastic IP ─────────────────────────────────────────────────
+      - name: Import Elastic IP
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          ID=$(aws ec2 describe-addresses \
+            --query 'Addresses[0].AllocationId' --output text)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_eip.nat $ID && echo "Imported EIP: $ID"
+
+      # ── Import Security Groups ────────────────────────────────────────────
+      - name: Import Security Groups
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          VPC=$(aws ec2 describe-vpcs \
+            --filters "Name=cidr,Values=10.0.0.0/16" "Name=isDefault,Values=false" \
+            --query 'Vpcs[0].VpcId' --output text)
+          ALB_SG=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$VPC" "Name=group-name,Values=sample-app-alb-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          ECS_SG=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$VPC" "Name=group-name,Values=sample-app-ecs-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          RDS_SG=$(aws ec2 describe-security-groups \
+            --filters "Name=vpc-id,Values=$VPC" "Name=group-name,Values=sample-app-rds-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text)
+          [ -n "$ALB_SG" ] && [ "$ALB_SG" != "None" ] && terraform import -lock=false aws_security_group.alb $ALB_SG
+          [ -n "$ECS_SG" ] && [ "$ECS_SG" != "None" ] && terraform import -lock=false aws_security_group.ecs $ECS_SG
+          [ -n "$RDS_SG" ] && [ "$RDS_SG" != "None" ] && terraform import -lock=false aws_security_group.rds $RDS_SG
+
+      # ── Import ALB ────────────────────────────────────────────────────────
+      - name: Import ALB
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          ID=$(aws elbv2 describe-load-balancers \
+            --names sample-app-alb \
+            --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_lb.app $ID && echo "Imported ALB"
+
+      # ── Import ECR ────────────────────────────────────────────────────────
+      - name: Import ECR repository
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          aws ecr describe-repositories --repository-names sample-app-backend 2>/dev/null && \
+          terraform import -lock=false aws_ecr_repository.backend sample-app-backend && echo "Imported ECR"
+
+      # ── Import ECS Cluster ────────────────────────────────────────────────
+      - name: Import ECS cluster
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          ID=$(aws ecs describe-clusters --clusters sample-app-cluster \
+            --query 'clusters[0].clusterArn' --output text 2>/dev/null)
+          [ -n "$ID" ] && [ "$ID" != "None" ] && terraform import -lock=false aws_ecs_cluster.app $ID && echo "Imported ECS cluster"
+
+      # ── Import IAM Role ───────────────────────────────────────────────────
+      - name: Import IAM role
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          aws iam get-role --role-name sample-app-ecs-task-execution-role 2>/dev/null && \
+          terraform import -lock=false aws_iam_role.ecs_task_execution sample-app-ecs-task-execution-role && echo "Imported IAM role"
+
+      # ── Import RDS Subnet Group ───────────────────────────────────────────
+      - name: Import RDS subnet group
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          aws rds describe-db-subnet-groups --db-subnet-group-name sample-app-db-subnet-group 2>/dev/null && \
+          terraform import -lock=false aws_db_subnet_group.main sample-app-db-subnet-group && echo "Imported RDS subnet group"
+
+      # ── Import RDS Instance ───────────────────────────────────────────────
+      - name: Import RDS instance
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          aws rds describe-db-instances --db-instance-identifier sample-app-db 2>/dev/null && \
+          terraform import -lock=false aws_db_instance.default sample-app-db && echo "Imported RDS instance"
+
+      # ── Import CloudWatch Log Group ───────────────────────────────────────
+      - name: Import CloudWatch log group
+        continue-on-error: true
+        working-directory: terraform
+        run: |
+          aws logs describe-log-groups --log-group-name-prefix /ecs/sample-app-backend \
+            --query 'logGroups[0].logGroupName' --output text 2>/dev/null | grep -q "sample-app" && \
+          terraform import -lock=false aws_cloudwatch_log_group.backend /ecs/sample-app-backend && echo "Imported log group"
+
+      - name: Summary
+        run: |
+          echo "Import complete!"
+          echo "Existing AWS resources are now tracked in Terraform state."
+          echo ""
+          echo "Now run the CI/CD pipeline to apply any remaining changes."
