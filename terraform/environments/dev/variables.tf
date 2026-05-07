@@ -27,9 +27,3 @@ variable "db_name" {
   type        = string
   default     = "sampledb"
 }
-
-variable "allowed_cidr" {
-  description = "CIDR range allowed to reach the public application load balancer"
-  type        = string
-  default     = "0.0.0.0/0"
-}

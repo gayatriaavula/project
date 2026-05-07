@@ -3,10 +3,11 @@ data "aws_availability_zones" "available" {
 }
 
 resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   tags = {
-    Name = "${var.app_name}-vpc"
+    Name        = "${var.app_name}-${var.environment}-vpc"
+    Environment = var.environment
   }
 }
 
@@ -17,7 +18,8 @@ resource "aws_subnet" "public" {
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
   tags = {
-    Name = "${var.app_name}-public-${count.index + 1}"
+    Name        = "${var.app_name}-${var.environment}-public-${count.index + 1}"
+    Environment = var.environment
   }
 }
 
@@ -27,14 +29,16 @@ resource "aws_subnet" "private" {
   cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 10)
   availability_zone = data.aws_availability_zones.available.names[count.index]
   tags = {
-    Name = "${var.app_name}-private-${count.index + 1}"
+    Name        = "${var.app_name}-${var.environment}-private-${count.index + 1}"
+    Environment = var.environment
   }
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
   tags = {
-    Name = "${var.app_name}-igw"
+    Name        = "${var.app_name}-${var.environment}-igw"
+    Environment = var.environment
   }
 }
 
@@ -45,7 +49,8 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
   tags = {
-    Name = "${var.app_name}-public-rt"
+    Name        = "${var.app_name}-${var.environment}-public-rt"
+    Environment = var.environment
   }
 }
 
@@ -63,7 +68,8 @@ resource "aws_nat_gateway" "main" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public[0].id
   tags = {
-    Name = "${var.app_name}-nat"
+    Name        = "${var.app_name}-${var.environment}-nat"
+    Environment = var.environment
   }
 }
 
@@ -74,7 +80,8 @@ resource "aws_route_table" "private" {
     nat_gateway_id = aws_nat_gateway.main.id
   }
   tags = {
-    Name = "${var.app_name}-private-rt"
+    Name        = "${var.app_name}-${var.environment}-private-rt"
+    Environment = var.environment
   }
 }
 

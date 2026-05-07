@@ -1,7 +1,7 @@
 resource "aws_security_group" "alb" {
-  name        = "${var.app_name}-alb-sg"
+  name        = "${var.app_name}-${var.environment}-alb-sg"
   description = "Allow HTTP access to the load balancer"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "HTTP from allowed CIDR"
@@ -19,14 +19,15 @@ resource "aws_security_group" "alb" {
   }
 
   tags = {
-    Name = "${var.app_name}-alb-sg"
+    Name        = "${var.app_name}-${var.environment}-alb-sg"
+    Environment = var.environment
   }
 }
 
 resource "aws_security_group" "ecs" {
-  name        = "${var.app_name}-ecs-sg"
+  name        = "${var.app_name}-${var.environment}-ecs-sg"
   description = "Allow ECS tasks to receive API traffic"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port       = 3000
@@ -43,14 +44,15 @@ resource "aws_security_group" "ecs" {
   }
 
   tags = {
-    Name = "${var.app_name}-ecs-sg"
+    Name        = "${var.app_name}-${var.environment}-ecs-sg"
+    Environment = var.environment
   }
 }
 
 resource "aws_security_group" "rds" {
-  name        = "${var.app_name}-rds-sg"
+  name        = "${var.app_name}-${var.environment}-rds-sg"
   description = "Allow database access from ECS tasks"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
 
   ingress {
     from_port       = 3306
@@ -67,6 +69,7 @@ resource "aws_security_group" "rds" {
   }
 
   tags = {
-    Name = "${var.app_name}-rds-sg"
+    Name        = "${var.app_name}-${var.environment}-rds-sg"
+    Environment = var.environment
   }
 }

@@ -1,8 +1,22 @@
 .DS_Store
 node_modules/
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.backup
-terraform/terraform.tfvars
 *.log
 .env
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.tflock
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Sensitive tfvars — never commit secrets
+terraform/environments/dev/terraform.tfvars.local
+terraform/environments/staging/terraform.tfvars.local
+terraform/environments/prod/terraform.tfvars.local

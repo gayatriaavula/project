@@ -10,13 +10,13 @@ terraform {
       version = "~> 3.0"
     }
   }
-  backend "s3" {}
+  backend "s3" {
+    key = "dev/terraform.tfstate"
+  }
 }
 
 provider "aws" {
   region = var.aws_region
 }
 
-provider "random" {
-  # random provider for unique resource names if needed
-}
+provider "random" {}

@@ -1,20 +1,21 @@
 resource "aws_ecr_repository" "backend" {
-  name                 = "${var.app_name}-backend"
+  name = "${var.app_name}-${var.environment}-backend"
   image_scanning_configuration {
     scan_on_push = true
   }
   tags = {
-    Name = "${var.app_name}-backend-repo"
+    Name        = "${var.app_name}-${var.environment}-backend-repo"
+    Environment = var.environment
   }
 }
 
 resource "aws_cloudwatch_log_group" "backend" {
-  name              = "/ecs/${var.app_name}-backend"
-  retention_in_days = 14
+  name              = "/ecs/${var.app_name}-${var.environment}-backend"
+  retention_in_days = var.log_retention_days
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
-  name = "${var.app_name}-ecs-task-execution-role"
+  name = "${var.app_name}-${var.environment}-ecs-task-execution-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -41,21 +42,22 @@ resource "aws_iam_role_policy_attachment" "ecr_read_only" {
 }
 
 resource "aws_lb" "app" {
-  name               = "${var.app_name}-alb"
+  name               = "${var.app_name}-${var.environment}-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb.id]
-  subnets            = aws_subnet.public[*].id
+  security_groups    = [var.alb_sg_id]
+  subnets            = var.public_subnet_ids
   tags = {
-    Name = "${var.app_name}-alb"
+    Name        = "${var.app_name}-${var.environment}-alb"
+    Environment = var.environment
   }
 }
 
 resource "aws_lb_target_group" "backend" {
-  name        = "${var.app_name}-backend-tg"
+  name        = "${var.app_name}-${var.environment}-backend-tg"
   port        = 3000
   protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = var.vpc_id
   target_type = "ip"
   health_check {
     path                = "/api/health"
@@ -65,7 +67,8 @@ resource "aws_lb_target_group" "backend" {
     matcher             = "200"
   }
   tags = {
-    Name = "${var.app_name}-backend-tg"
+    Name        = "${var.app_name}-${var.environment}-backend-tg"
+    Environment = var.environment
   }
 }
 
@@ -81,20 +84,23 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_ecs_cluster" "app" {
-  name = "${var.app_name}-cluster"
+  name = "${var.app_name}-${var.environment}-cluster"
+  tags = {
+    Environment = var.environment
+  }
 }
 
 resource "aws_ecs_task_definition" "backend" {
-  family                   = "${var.app_name}-backend-task"
+  family                   = "${var.app_name}-${var.environment}-backend-task"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
+  cpu                      = var.cpu
+  memory                   = var.memory
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   container_definitions = jsonencode([
     {
-      name      = "backend"
-      image     = "${aws_ecr_repository.backend.repository_url}:latest"
+      name  = "backend"
+      image = "${aws_ecr_repository.backend.repository_url}:latest"
       portMappings = [
         {
           containerPort = 3000
@@ -103,7 +109,7 @@ resource "aws_ecs_task_definition" "backend" {
         }
       ]
       environment = [
-        { name = "DB_HOST", value = aws_db_instance.default.address },
+        { name = "DB_HOST", value = var.db_host },
         { name = "DB_USER", value = var.db_username },
         { name = "DB_PASSWORD", value = var.db_password },
         { name = "DB_NAME", value = var.db_name }
@@ -121,15 +127,15 @@ resource "aws_ecs_task_definition" "backend" {
 }
 
 resource "aws_ecs_service" "backend" {
-  name            = "${var.app_name}-backend-service"
+  name            = "${var.app_name}-${var.environment}-backend-service"
   cluster         = aws_ecs_cluster.app.id
   launch_type     = "FARGATE"
-  desired_count   = 1
+  desired_count   = var.desired_count
   task_definition = aws_ecs_task_definition.backend.arn
 
   network_configuration {
-    subnets         = aws_subnet.private[*].id
-    security_groups = [aws_security_group.ecs.id]
+    subnets          = var.private_subnet_ids
+    security_groups  = [var.ecs_sg_id]
     assign_public_ip = false
   }
 

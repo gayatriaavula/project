@@ -1,0 +1,226 @@
+name: Deploy — Staging
+
+# Triggered automatically when code is merged into the staging branch.
+# Deploys to the staging AWS environment with no manual approval required.
+
+on:
+  push:
+    branches: [staging]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  ENVIRONMENT:       staging
+  TF_DIR:            terraform/environments/staging
+  AWS_REGION:        ${{ secrets.AWS_REGION }}
+  TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+  TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Run ESLint
+        working-directory: backend
+        run: npm run lint
+
+  # ── Test ──────────────────────────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Syntax check
+        working-directory: backend
+        run: node --check server.js
+
+      - name: Run tests
+        working-directory: backend
+        run: npm test
+
+  # ── Terraform plan ────────────────────────────────────────────────────────
+  plan:
+    name: Terraform Plan (staging)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+      - name: Clear stale state lock
+        continue-on-error: true
+        run: |
+          aws s3 rm "s3://${{ secrets.TF_STATE_BUCKET }}/staging/terraform.tfstate.tflock" || true
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -no-color -lock=false -out=tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-staging
+          path: ${{ env.TF_DIR }}/tfplan
+          retention-days: 1
+
+  # ── Deploy to staging (auto — no approval required) ──────────────────────
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [test, plan]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-staging
+          path: ${{ env.TF_DIR }}
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve -lock=false tfplan
+
+      - name: Capture terraform outputs
+        id: tf_outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)"           >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$(terraform output -raw ecs_cluster_name)"         >> $GITHUB_OUTPUT
+          echo "ecs_service=$(terraform output -raw ecs_service_name)"         >> $GITHUB_OUTPUT
+          echo "backend_url=$(terraform output -raw backend_url)"              >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_OUTPUT
+          echo "frontend_url=$(terraform output -raw frontend_url)"            >> $GITHUB_OUTPUT
+
+      - name: Resolve deployment variables
+        id: vars
+        env:
+          TF_ECR_URL:         ${{ steps.tf_outputs.outputs.ecr_url }}
+          TF_ECS_CLUSTER:     ${{ steps.tf_outputs.outputs.ecs_cluster }}
+          TF_ECS_SERVICE:     ${{ steps.tf_outputs.outputs.ecs_service }}
+          TF_BACKEND_URL:     ${{ steps.tf_outputs.outputs.backend_url }}
+          TF_FRONTEND_BUCKET: ${{ steps.tf_outputs.outputs.frontend_bucket }}
+          TF_FRONTEND_URL:    ${{ steps.tf_outputs.outputs.frontend_url }}
+        run: |
+          ECR_URL=${TF_ECR_URL:-$(aws ecr describe-repositories \
+            --repository-names sample-app-staging-backend \
+            --query 'repositories[0].repositoryUri' --output text)}
+          ECS_CLUSTER=${TF_ECS_CLUSTER:-sample-app-staging-cluster}
+          ECS_SERVICE=${TF_ECS_SERVICE:-sample-app-staging-backend-service}
+          BACKEND_URL=${TF_BACKEND_URL:-$(aws elbv2 describe-load-balancers \
+            --names sample-app-staging-alb \
+            --query 'LoadBalancers[0].DNSName' --output text)}
+          FRONTEND_BUCKET=${TF_FRONTEND_BUCKET:-$(aws s3api list-buckets \
+            --query 'Buckets[?contains(Name,`sample-app-staging-frontend`)].Name' \
+            --output text | awk '{print $1}')}
+          FRONTEND_URL=${TF_FRONTEND_URL:-"http://${FRONTEND_BUCKET}.s3-website-${AWS_REGION}.amazonaws.com"}
+          echo "ecr_url=$ECR_URL"                >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$ECS_CLUSTER"         >> $GITHUB_OUTPUT
+          echo "ecs_service=$ECS_SERVICE"         >> $GITHUB_OUTPUT
+          echo "backend_url=$BACKEND_URL"         >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$FRONTEND_BUCKET" >> $GITHUB_OUTPUT
+          echo "frontend_url=$FRONTEND_URL"       >> $GITHUB_OUTPUT
+
+      - name: Build and push backend image
+        env:
+          ECR_URL: ${{ steps.vars.outputs.ecr_url }}
+        run: |
+          ECR_REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
+          aws ecr get-login-password --region "$AWS_REGION" | \
+            docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          docker build -t sample-backend ./backend
+          docker tag sample-backend:latest "$ECR_URL:latest"
+          docker push "$ECR_URL:latest"
+
+      - name: Force ECS deployment and wait
+        env:
+          ECS_CLUSTER: ${{ steps.vars.outputs.ecs_cluster }}
+          ECS_SERVICE:  ${{ steps.vars.outputs.ecs_service }}
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --force-new-deployment
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+      - name: Deploy frontend to S3
+        env:
+          BACKEND_URL:     ${{ steps.vars.outputs.backend_url }}
+          FRONTEND_BUCKET: ${{ steps.vars.outputs.frontend_bucket }}
+        run: |
+          sed -i "s|REPLACE_WITH_BACKEND_API_URL|http://$BACKEND_URL|g" frontend/app.js
+          aws s3 sync ./frontend "s3://$FRONTEND_BUCKET" --delete
+
+      - name: Deployment summary
+        env:
+          FRONTEND_URL: ${{ steps.vars.outputs.frontend_url }}
+          BACKEND_URL:  ${{ steps.vars.outputs.backend_url }}
+        run: |
+          echo "================================"
+          echo "Staging deployment complete!"
+          echo "Frontend: $FRONTEND_URL"
+          echo "Backend:  http://$BACKEND_URL"
+          echo "================================"

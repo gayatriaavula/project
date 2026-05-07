@@ -3,10 +3,11 @@ resource "random_id" "bucket_suffix" {
 }
 
 resource "aws_s3_bucket" "frontend" {
-  bucket        = format("%s-frontend-%s", var.app_name, random_id.bucket_suffix.hex)
+  bucket        = format("%s-%s-frontend-%s", var.app_name, var.environment, random_id.bucket_suffix.hex)
   force_destroy = true
   tags = {
-    Name = "${var.app_name}-frontend-bucket"
+    Name        = "${var.app_name}-${var.environment}-frontend-bucket"
+    Environment = var.environment
   }
 }
 
