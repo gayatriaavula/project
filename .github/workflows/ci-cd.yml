@@ -12,8 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test Backend
+  # ── Stage 1: Lint ────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,27 +27,24 @@ jobs:
         working-directory: backend
         run: npm install
 
-      - name: Syntax check
+      - name: Run ESLint
         working-directory: backend
-        run: node --check server.js
+        run: npm run lint
 
-  terraform:
-    name: Terraform
+  # ── Stage 2: Build ───────────────────────────────────────────────────────────
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    needs: test
+    needs: lint
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
       TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
       TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-    outputs:
-      ecr_url: ${{ steps.tf_outputs.outputs.ecr_url }}
-      ecs_cluster: ${{ steps.tf_outputs.outputs.ecs_cluster }}
-      ecs_service: ${{ steps.tf_outputs.outputs.ecs_service }}
-      backend_url: ${{ steps.tf_outputs.outputs.backend_url }}
-      frontend_bucket: ${{ steps.tf_outputs.outputs.frontend_bucket }}
-      frontend_url: ${{ steps.tf_outputs.outputs.frontend_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t sample-backend ./backend
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -107,30 +105,51 @@ jobs:
               body: `## Terraform Plan\n\`\`\`\n${truncated}\n\`\`\``
             });
 
-      - name: Terraform apply
-        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-        working-directory: terraform
-        run: terraform apply -auto-approve -lock=false tfplan
-
-      - name: Capture terraform outputs
-        id: tf_outputs
-        if: success() && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-        working-directory: terraform
-        run: |
-          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
-          echo "ecs_cluster=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_OUTPUT
-          echo "ecs_service=$(terraform output -raw ecs_service_name)" >> $GITHUB_OUTPUT
-          echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
-          echo "frontend_bucket=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_OUTPUT
-          echo "frontend_url=$(terraform output -raw frontend_url)" >> $GITHUB_OUTPUT
-
-  deploy:
-    name: Build and Deploy
+  # ── Stage 3: Test ────────────────────────────────────────────────────────────
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    needs: terraform
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Syntax check
+        working-directory: backend
+        run: node --check server.js
+
+      - name: Run tests
+        working-directory: backend
+        run: npm test
+
+  # ── Stage 4: Manual Approval ─────────────────────────────────────────────────
+  approve:
+    name: Manual Approval
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment: production
+    steps:
+      - name: Deployment approved
+        run: echo "Manual approval received. Proceeding with deployment."
+
+  # ── Stage 5: Deploy ──────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: approve
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -141,15 +160,55 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=app/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: Force unlock stale state lock
+        continue-on-error: true
+        env:
+          BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          aws s3 rm "s3://${BUCKET}/app/terraform.tfstate.tflock" || echo "No lock file found"
+
+      - name: Terraform plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan -no-color -lock=false
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -lock=false tfplan
+
+      - name: Capture terraform outputs
+        id: tf_outputs
+        working-directory: terraform
+        run: |
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_OUTPUT
+          echo "ecs_service=$(terraform output -raw ecs_service_name)" >> $GITHUB_OUTPUT
+          echo "backend_url=$(terraform output -raw backend_url)" >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(terraform output -raw frontend_bucket_name)" >> $GITHUB_OUTPUT
+          echo "frontend_url=$(terraform output -raw frontend_url)" >> $GITHUB_OUTPUT
+
       - name: Resolve deployment variables
         id: vars
         env:
-          TF_ECR_URL: ${{ needs.terraform.outputs.ecr_url }}
-          TF_ECS_CLUSTER: ${{ needs.terraform.outputs.ecs_cluster }}
-          TF_ECS_SERVICE: ${{ needs.terraform.outputs.ecs_service }}
-          TF_BACKEND_URL: ${{ needs.terraform.outputs.backend_url }}
-          TF_FRONTEND_BUCKET: ${{ needs.terraform.outputs.frontend_bucket }}
-          TF_FRONTEND_URL: ${{ needs.terraform.outputs.frontend_url }}
+          TF_ECR_URL: ${{ steps.tf_outputs.outputs.ecr_url }}
+          TF_ECS_CLUSTER: ${{ steps.tf_outputs.outputs.ecs_cluster }}
+          TF_ECS_SERVICE: ${{ steps.tf_outputs.outputs.ecs_service }}
+          TF_BACKEND_URL: ${{ steps.tf_outputs.outputs.backend_url }}
+          TF_FRONTEND_BUCKET: ${{ steps.tf_outputs.outputs.frontend_bucket }}
+          TF_FRONTEND_URL: ${{ steps.tf_outputs.outputs.frontend_url }}
         run: |
           ECR_URL=${TF_ECR_URL:-$(aws ecr describe-repositories --repository-names sample-app-backend --query 'repositories[0].repositoryUri' --output text)}
           ECS_CLUSTER=${TF_ECS_CLUSTER:-$(aws ecs list-clusters --query 'clusterArns[0]' --output text | xargs aws ecs describe-clusters --clusters --query 'clusters[0].clusterName' --output text)}
