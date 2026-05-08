@@ -7,7 +7,7 @@ WORKDIR /usr/src/app
 
 # Copy manifests first so npm install layer is cached separately
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy application source (node_modules, tests, .env excluded via .dockerignore)
 COPY . .
