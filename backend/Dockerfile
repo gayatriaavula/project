@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Run as non-root user — avoids Trivy HIGH finding for root container
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -17,4 +17,9 @@ RUN chown -R appuser:appgroup /usr/src/app
 USER appuser
 
 EXPOSE 3000
+
+# Health check — Trivy DS-0026 and Docker best practice
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
 CMD ["node", "server.js"]

@@ -30,6 +30,7 @@ resource "aws_security_group" "ecs" {
   vpc_id      = var.vpc_id
 
   ingress {
+    description     = "API traffic from ALB"
     from_port       = 3000
     to_port         = 3000
     protocol        = "tcp"
@@ -55,6 +56,7 @@ resource "aws_security_group" "rds" {
   vpc_id      = var.vpc_id
 
   ingress {
+    description     = "MySQL from ECS tasks only"
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"

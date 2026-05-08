@@ -1,17 +1,26 @@
 # .trivyignore — suppress known false positives or accepted risks.
 #
-# Format: one CVE ID per line. Add a comment explaining why it is accepted.
+# Format: one AVD/CVE ID per line with a comment explaining why it is accepted.
 # Keep this list as short as possible — prefer fixing over ignoring.
-#
-# Example:
-# CVE-2023-XXXX  # unfixed in Alpine 3.18; no patch upstream yet, low exploitability
 
-# ── Terraform IaC suppressions ────────────────────────────────────────────────
-# The S3 frontend bucket intentionally uses public-read ACL for static website
-# hosting. Trivy flags this as a misconfiguration but it is by design.
-AVD-AWS-0094    # S3 bucket has public access block disabled (frontend website bucket)
-AVD-AWS-0132    # S3 bucket is not encrypted (public static assets — no sensitive data)
+# ── S3 frontend bucket — intentionally public for static website hosting ──────
+# All findings below relate to the frontend S3 bucket which serves a public
+# static website. Public access is required by design. No sensitive data is
+# stored here — only HTML, CSS, and JS assets.
 
-# RDS deletion protection is off in dev/staging by design (cost/ease of teardown).
+AVD-AWS-0094    # S3 public access block disabled — frontend website bucket (by design)
+AVD-AWS-0132    # S3 not encrypted — public static assets, no sensitive data
+
+AWS-0086        # S3 block public ACL — frontend website requires public ACL (by design)
+AWS-0087        # S3 block public policy — frontend website requires public bucket policy
+AWS-0091        # S3 ignore public ACL — frontend website bucket must allow public ACL
+AWS-0092        # S3 not publicly accessible via ACL — frontend website requires public-read ACL
+AWS-0093        # S3 restrict public bucket — frontend website requires public access
+
+AWS-0089        # S3 bucket logging not enabled — static assets only, no sensitive data
+AWS-0090        # S3 versioning not enabled — static single-version deployment, no versioning needed
+
+# ── RDS deletion protection ───────────────────────────────────────────────────
+# Dev and staging have deletion_protection = false for easy teardown.
 # Production has deletion_protection = true in terraform/environments/prod/main.tf.
 # AVD-AWS-0177  # uncomment to suppress RDS deletion-protection check across all envs
