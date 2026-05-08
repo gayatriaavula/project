@@ -1,12 +1,16 @@
-name: CI — Lint, Validate & Test
+name: CI — Lint, Validate, Security & Test
 
-# Runs on every PR. Validates the terraform environment that matches the
-# target branch (develop → dev, staging → staging, main → prod).
-# No infrastructure is created or changed.
+# Runs on every PR. All jobs must pass before the PR can be merged.
+# Validates the terraform environment that matches the target branch.
 
 on:
   pull_request:
     branches: [main, staging, develop]
+
+permissions:
+  contents: read
+  security-events: write   # Trivy SARIF upload
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.head_ref }}
@@ -25,16 +29,15 @@ jobs:
         run: |
           case "${{ github.base_ref }}" in
             main)
-              echo "environment=prod"                          >> $GITHUB_OUTPUT
-              echo "tf_dir=terraform/environments/prod"        >> $GITHUB_OUTPUT ;;
+              echo "environment=prod"                       >> $GITHUB_OUTPUT
+              echo "tf_dir=terraform/environments/prod"     >> $GITHUB_OUTPUT ;;
             staging)
-              echo "environment=staging"                       >> $GITHUB_OUTPUT
-              echo "tf_dir=terraform/environments/staging"     >> $GITHUB_OUTPUT ;;
+              echo "environment=staging"                    >> $GITHUB_OUTPUT
+              echo "tf_dir=terraform/environments/staging"  >> $GITHUB_OUTPUT ;;
             *)
-              echo "environment=dev"                           >> $GITHUB_OUTPUT
-              echo "tf_dir=terraform/environments/dev"         >> $GITHUB_OUTPUT ;;
+              echo "environment=dev"                        >> $GITHUB_OUTPUT
+              echo "tf_dir=terraform/environments/dev"      >> $GITHUB_OUTPUT ;;
           esac
-          echo "PR targets: ${{ github.base_ref }} → ${environment}"
 
   # ── Lint ──────────────────────────────────────────────────────────────────
   lint:
@@ -42,15 +45,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install dependencies
         working-directory: backend
         run: npm install
-
       - name: Run ESLint
         working-directory: backend
         run: npm run lint
@@ -62,24 +62,34 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install dependencies
         working-directory: backend
         run: npm install
-
       - name: Syntax check
         working-directory: backend
         run: node --check server.js
-
       - name: Run tests
         working-directory: backend
         run: npm test
 
-  # ── Terraform validate + plan (no apply) ─────────────────────────────────
+  # ── Security (Trivy + SonarCloud) ─────────────────────────────────────────
+  # Calls the shared _security.yml reusable workflow.
+  # This is a REQUIRED check — PRs cannot merge if security scans fail.
+  security:
+    name: Security Scans
+    needs: lint
+    uses: ./.github/workflows/_security.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: read
+
+  # ── Terraform validate + plan ─────────────────────────────────────────────
   terraform-plan:
     name: Terraform Plan (${{ needs.setup.outputs.environment }})
     runs-on: ubuntu-latest
@@ -89,18 +99,15 @@ jobs:
       TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ secrets.AWS_REGION }}
-
       - name: Terraform init
         working-directory: ${{ needs.setup.outputs.tf_dir }}
         run: |
@@ -108,20 +115,16 @@ jobs:
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="region=${{ secrets.AWS_REGION }}" \
             -backend-config="encrypt=true"
-
       - name: Terraform validate
         working-directory: ${{ needs.setup.outputs.tf_dir }}
         run: terraform validate
-
       - name: Terraform plan
         working-directory: ${{ needs.setup.outputs.tf_dir }}
         run: terraform plan -no-color -lock=false -out=tfplan
-
-      - name: Show plan summary on PR
+      - name: Show plan and comment on PR
         working-directory: ${{ needs.setup.outputs.tf_dir }}
         run: terraform show -no-color tfplan > plan.txt
         continue-on-error: true
-
       - name: Comment plan on PR
         uses: actions/github-script@v7
         with:
