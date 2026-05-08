@@ -1,27 +1,32 @@
-name: Security Scans (reusable)
+name: Trivy — Security Scanning
 
-# Called by ci.yml, deploy-dev.yml, deploy-staging.yml, deploy-prod.yml.
-# All three Trivy jobs must pass before the caller can proceed to deployment.
+# Runs automatically on push and PRs.
+# Manual trigger: Actions tab → "Trivy — Security Scanning" → Run workflow.
+# Weekly schedule: catches new CVEs on unchanged code every Monday 6am UTC.
+# Results appear in: github.com/gayatriaavula/project/security/code-scanning
 
 on:
-  workflow_call:
+  workflow_dispatch:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+  schedule:
+    - cron: '0 6 * * 1'   # Every Monday 6:00 UTC
 
 permissions:
   contents: read
   security-events: write
-  pull-requests: read
 
 jobs:
-  # ── 1. Trivy — Filesystem & Secrets ────────────────────────────────────────
-  # Scans source code for hardcoded secrets, CVEs in package manifests,
-  # and general misconfigurations. Fails on CRITICAL or HIGH findings.
+  # ── Scan 1: Filesystem — source code, secrets, npm CVEs ───────────────────
   trivy-fs:
-    name: Trivy — Filesystem & Secrets
+    name: Filesystem & Secrets
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Trivy filesystem scan
+      - name: Trivy — filesystem scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
@@ -34,23 +39,21 @@ jobs:
           skip-dirs: node_modules,.terraform
           trivyignores: .trivyignore
 
-      - name: Upload to GitHub Security tab
+      - name: Upload results → GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-filesystem
 
-  # ── 2. Trivy — IaC (Terraform) ─────────────────────────────────────────────
-  # Detects Terraform misconfigurations: unrestricted ingress, missing
-  # encryption, public S3 buckets, over-permissive IAM, etc.
+  # ── Scan 2: IaC — Terraform misconfigurations ─────────────────────────────
   trivy-iac:
-    name: Trivy — IaC (Terraform)
+    name: IaC (Terraform)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run Trivy IaC scan
+      - name: Trivy — IaC scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: config
@@ -61,18 +64,16 @@ jobs:
           exit-code: '1'
           trivyignores: .trivyignore
 
-      - name: Upload to GitHub Security tab
+      - name: Upload results → GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
 
-  # ── 3. Trivy — Container Image ─────────────────────────────────────────────
-  # Builds the Docker image and scans for OS-level and library CVEs.
-  # ignore-unfixed: only fails on CVEs that have an available fix upstream.
+  # ── Scan 3: Container image — OS + library CVEs ───────────────────────────
   trivy-image:
-    name: Trivy — Container Image
+    name: Container Image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +81,7 @@ jobs:
       - name: Build Docker image
         run: docker build -t scan-target:${{ github.sha }} ./backend
 
-      - name: Run Trivy image scan
+      - name: Trivy — image scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: image
@@ -92,7 +93,7 @@ jobs:
           ignore-unfixed: true
           trivyignores: .trivyignore
 
-      - name: Upload to GitHub Security tab
+      - name: Upload results → GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
