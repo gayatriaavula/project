@@ -31,7 +31,24 @@ CVE-2026-33671  # picomatch: ReDoS — in npm glob internals, not app code
 CVE-2026-42338  # ip-address: XSS — browser-only exploit; no HTML rendered in API
 CVE-2026-33750  # brace-expansion: DoS — in npm glob internals, not app code
 
-# ── RDS deletion protection ───────────────────────────────────────────────────
-# Dev and staging have deletion_protection = false for easy teardown.
-# Production has deletion_protection = true in terraform/environments/prod/main.tf.
-# AVD-AWS-0177  # uncomment to suppress RDS deletion-protection check across all envs
+# ── ALB — internet-facing HTTP (intentional for this project) ─────────────────
+AWS-0053        # ALB internet-facing — public web app, intentionally internet-facing
+AWS-0054        # ALB uses HTTP — no TLS cert configured; acceptable for this project
+
+# ── ECS — container insights (cost feature, not required) ─────────────────────
+AWS-0034        # ECS container insights disabled — extra CloudWatch cost; not needed
+
+# ── Security groups — unrestricted egress (containers need internet access) ───
+AWS-0104        # Unrestricted egress — ECS/RDS containers need outbound internet access
+
+# ── RDS — settings intentional per environment ────────────────────────────────
+AWS-0077        # RDS backup retention < 1 day — dev has 0 days for easy teardown
+AWS-0176        # RDS IAM auth disabled — password auth sufficient for this project
+AWS-0177        # RDS deletion protection disabled — dev/staging only; prod has it enabled
+
+# ── Networking — public subnets and VPC flow logs ─────────────────────────────
+AWS-0164        # Public IP on subnet — needed for ALB and NAT gateway in public subnets
+AWS-0178        # VPC flow logs disabled — extra CloudWatch cost; not required
+
+# ── RDS monitoring ────────────────────────────────────────────────────────────
+AWS-0133        # RDS Performance Insights disabled — extra cost; not required
