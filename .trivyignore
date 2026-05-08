@@ -52,3 +52,9 @@ AWS-0178        # VPC flow logs disabled — extra CloudWatch cost; not required
 
 # ── RDS monitoring ────────────────────────────────────────────────────────────
 AWS-0133        # RDS Performance Insights disabled — extra cost; not required
+
+# ── KMS Customer Managed Keys — extra cost with minimal added security ─────────
+# AWS-managed keys (default) already encrypt CloudWatch logs and ECR at rest.
+# CMKs add ~$1/month per key plus cross-service key policy complexity.
+AWS-0017        # CloudWatch log group not encrypted with CMK — AWS-managed key in use
+AWS-0033        # ECR repository not encrypted with CMK — AWS-managed key in use
