@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy — filesystem scan
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy — IaC scan
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: terraform/
@@ -82,7 +82,7 @@ jobs:
         run: docker build -t scan-target:${{ github.sha }} ./backend
 
       - name: Trivy — image scan
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: scan-target:${{ github.sha }}
