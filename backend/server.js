@@ -20,7 +20,7 @@ const dbConfig = {
 };
 
 async function initDatabase() {
-  const pool = await mysql.createPool(dbConfig);
+  const pool = mysql.createPool(dbConfig);
   await pool.query(`CREATE TABLE IF NOT EXISTS visitors (
     id INT AUTO_INCREMENT PRIMARY KEY,
     visited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
