@@ -120,7 +120,7 @@ jobs:
         working-directory: backend
         run: npm install
 
-      - name: Run tests with coverage (lcov)
+      - name: Run tests with coverage
         working-directory: backend
         run: npm run test:coverage
 

@@ -5,6 +5,7 @@ node_modules/
 
 # Test coverage output
 backend/coverage/
+backend/.nyc_output/
 
 # Trivy SARIF reports (generated in CI, not needed in repo)
 trivy-*.sarif
