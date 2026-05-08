@@ -1,0 +1,192 @@
+name: Security — Trivy & SonarCloud
+
+# Runs on every PR and every push to the three long-lived branches.
+# Results appear in the GitHub Security tab (SARIF) and SonarCloud dashboard.
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+
+permissions:
+  contents: read
+  security-events: write   # required to upload SARIF to GitHub Security tab
+  pull-requests: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # 1. TRIVY — Filesystem scan (source code + secrets)
+  # Detects hardcoded secrets, known CVEs in package files, misconfigurations.
+  # ────────────────────────────────────────────────────────────────────────────
+  trivy-fs:
+    name: Trivy — Filesystem & Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gate: fail the job if CRITICAL or HIGH vulnerabilities / secrets found
+      - name: Trivy FS scan (gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          skip-dirs: node_modules,.terraform
+          scanners: vuln,secret,misconfig
+
+      # Report: always upload SARIF so findings appear in the Security tab
+      - name: Trivy FS scan (SARIF report)
+        uses: aquasecurity/trivy-action@0.28.0
+        if: always()
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: '0'
+          skip-dirs: node_modules,.terraform
+          scanners: vuln,secret,misconfig
+
+      - name: Upload FS scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-filesystem
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 2. TRIVY — IaC scan (Terraform)
+  # Detects Terraform misconfigurations: open security groups, missing encryption,
+  # public S3 buckets, IAM over-permission, etc.
+  # ────────────────────────────────────────────────────────────────────────────
+  trivy-iac:
+    name: Trivy — IaC (Terraform)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gate: fail if HIGH or CRITICAL Terraform misconfigurations found
+      - name: Trivy IaC scan (gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+      # Report: upload full findings including MEDIUM
+      - name: Trivy IaC scan (SARIF report)
+        uses: aquasecurity/trivy-action@0.28.0
+        if: always()
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          format: sarif
+          output: trivy-iac.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: '0'
+
+      - name: Upload IaC scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-iac.sarif
+          category: trivy-iac
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 3. TRIVY — Container image scan
+  # Builds the Docker image and scans it for OS-level and library CVEs.
+  # Fails the job on CRITICAL vulnerabilities; reports HIGH in the Security tab.
+  # ────────────────────────────────────────────────────────────────────────────
+  trivy-image:
+    name: Trivy — Container Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t scan-target:${{ github.sha }} ./backend
+
+      # Gate: fail on CRITICAL OS/library CVEs in the image
+      - name: Trivy image scan (gate)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: scan-target:${{ github.sha }}
+          format: table
+          severity: CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+      # Report: upload SARIF with CRITICAL + HIGH findings for visibility
+      - name: Trivy image scan (SARIF report)
+        uses: aquasecurity/trivy-action@0.28.0
+        if: always()
+        with:
+          scan-type: image
+          image-ref: scan-target:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+
+      - name: Upload image scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-container
+
+      # Bonus: print a human-readable summary table in the job log
+      - name: Print full vulnerability table
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: scan-target:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: '0'
+          ignore-unfixed: false
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 4. SONARCLOUD — Code quality & coverage analysis
+  # Checks code smells, bugs, vulnerabilities, duplications, and test coverage.
+  # Requires secrets: SONAR_TOKEN (from sonarcloud.io)
+  # ────────────────────────────────────────────────────────────────────────────
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      # Full git history needed for accurate blame and new-code detection
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Run tests with coverage
+        working-directory: backend
+        run: npm run test:coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3.1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}

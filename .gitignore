@@ -3,6 +3,12 @@ node_modules/
 *.log
 .env
 
+# Test coverage output
+backend/coverage/
+
+# Trivy SARIF reports (generated in CI, not needed in repo)
+trivy-*.sarif
+
 # Terraform
 **/.terraform/
 *.tfstate
