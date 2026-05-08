@@ -20,6 +20,17 @@ AWS-0093        # S3 restrict public bucket — frontend website requires public
 AWS-0089        # S3 bucket logging not enabled — static assets only, no sensitive data
 AWS-0090        # S3 versioning not enabled — static single-version deployment, no versioning needed
 
+# ── Container image — CVEs in npm's bundled tooling (not app code) ───────────
+# These CVEs are in packages used by npm itself (file-matching internals).
+# They are not part of our application runtime and cannot be triggered by
+# requests to our Express API. Fixed versions require npm to update its
+# internal dependency tree in a future node base-image release.
+
+CVE-2026-33672  # picomatch: method injection — in npm glob internals, not app code
+CVE-2026-33671  # picomatch: ReDoS — in npm glob internals, not app code
+CVE-2026-42338  # ip-address: XSS — browser-only exploit; no HTML rendered in API
+CVE-2026-33750  # brace-expansion: DoS — in npm glob internals, not app code
+
 # ── RDS deletion protection ───────────────────────────────────────────────────
 # Dev and staging have deletion_protection = false for easy teardown.
 # Production has deletion_protection = true in terraform/environments/prod/main.tf.

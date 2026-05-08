@@ -4,10 +4,15 @@ const mysql = require('mysql2/promise');
 const app = express();
 const port = process.env.PORT || 3000;
 
+if (!process.env.DB_PASSWORD) {
+  console.error('DB_PASSWORD environment variable is required');
+  process.exit(1);
+}
+
 const dbConfig = {
   host: process.env.DB_HOST || '127.0.0.1',
   user: process.env.DB_USER || 'appuser',
-  password: process.env.DB_PASSWORD || 'password',
+  password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || 'sampledb',
   port: parseInt(process.env.DB_PORT || '3306', 10),
   waitForConnections: true,
