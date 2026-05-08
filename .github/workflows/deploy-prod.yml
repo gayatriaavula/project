@@ -216,21 +216,39 @@ jobs:
         env:
           ECR_URL: ${{ steps.vars.outputs.ecr_url }}
         run: |
+          IMAGE_TAG="${GITHUB_SHA}"
           ECR_REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
           aws ecr get-login-password --region "$AWS_REGION" | \
             docker login --username AWS --password-stdin "$ECR_REGISTRY"
           docker build -t sample-backend ./backend
-          docker tag sample-backend:latest "$ECR_URL:latest"
-          docker push "$ECR_URL:latest"
+          docker tag sample-backend:latest "$ECR_URL:$IMAGE_TAG"
+          docker push "$ECR_URL:$IMAGE_TAG"
 
-      - name: Force ECS deployment and wait
+      - name: Update ECS task definition and deploy
         env:
           ECS_CLUSTER: ${{ steps.vars.outputs.ecs_cluster }}
           ECS_SERVICE:  ${{ steps.vars.outputs.ecs_service }}
+          ECR_URL:      ${{ steps.vars.outputs.ecr_url }}
         run: |
-          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
-            --force-new-deployment
-          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          FULL_IMAGE="$ECR_URL:${GITHUB_SHA}"
+          TASK_FAMILY=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | \
+            sed 's|.*/||' | cut -d: -f1)
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition "$TASK_FAMILY" --query 'taskDefinition' --output json)
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$FULL_IMAGE" '
+            .containerDefinitions[0].image = $IMAGE |
+            del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)')
+          NEW_TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --task-definition "$NEW_TASK_ARN"
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
 
       - name: Deploy frontend to S3
         env:

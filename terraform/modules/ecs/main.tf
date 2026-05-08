@@ -99,6 +99,9 @@ resource "aws_ecs_task_definition" "backend" {
   cpu                      = var.cpu
   memory                   = var.memory
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  lifecycle {
+    ignore_changes = [container_definitions]
+  }
   container_definitions = jsonencode([
     {
       name  = "backend"
