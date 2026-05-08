@@ -66,8 +66,6 @@ jobs:
     name: Security Scans
     needs: lint
     uses: ./.github/workflows/_security.yml
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     permissions:
       contents: read
       security-events: write

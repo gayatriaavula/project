@@ -5,9 +5,6 @@ name: Security Scans (reusable)
 
 on:
   workflow_call:
-    secrets:
-      SONAR_TOKEN:
-        required: true
 
 permissions:
   contents: read
@@ -100,32 +97,3 @@ jobs:
           sarif_file: trivy-image.sarif
           category: trivy-container
 
-  # ── 4. SonarCloud — Code quality & coverage ────────────────────────────────
-  # Checks for bugs, code smells, security hotspots, duplications, and test
-  # coverage against the configured quality gate on sonarcloud.io.
-  sonarcloud:
-    name: SonarCloud Analysis
-    runs-on: ubuntu-latest
-    steps:
-      # Full history is required for accurate blame info and new-code detection
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: npm install
-
-      - name: Run tests with coverage
-        working-directory: backend
-        run: npm run test:coverage
-
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v3.1.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}

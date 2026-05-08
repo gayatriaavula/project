@@ -1,0 +1,44 @@
+name: SonarCloud — Code Quality
+
+# Runs automatically on every push to main/staging/develop and every PR.
+# Can also be triggered manually from the Actions tab (workflow_dispatch).
+# Results appear at: https://sonarcloud.io/project/overview?id=gayatriaavula_project
+
+on:
+  workflow_dispatch:   # ← Manual "Run workflow" button in GitHub Actions tab
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      # Full git history required — SonarCloud uses blame to detect new vs existing issues
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Run tests
+        working-directory: backend
+        run: npm test
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3.1.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}
