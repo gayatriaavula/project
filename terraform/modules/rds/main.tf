@@ -21,7 +21,7 @@ resource "aws_db_instance" "default" {
   publicly_accessible     = false
   deletion_protection     = var.deletion_protection
   backup_retention_period = var.backup_retention_period
-  storage_encrypted       = true
+  storage_encrypted       = var.storage_encrypted
   tags = {
     Name        = "${var.app_name}-${var.environment}-db"
     Environment = var.environment

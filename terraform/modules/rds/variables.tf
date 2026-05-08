@@ -57,3 +57,9 @@ variable "deletion_protection" {
   type        = bool
   default     = false
 }
+
+variable "storage_encrypted" {
+  description = "Enable encryption at rest for the RDS instance. Cannot be changed on existing instances without destroy+recreate."
+  type        = bool
+  default     = false
+}

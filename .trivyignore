@@ -43,6 +43,7 @@ AWS-0104        # Unrestricted egress — ECS/RDS containers need outbound inter
 
 # ── RDS — settings intentional per environment ────────────────────────────────
 AWS-0077        # RDS backup retention < 1 day — dev has 0 days for easy teardown
+AWS-0080        # RDS encryption not enabled — existing instances cannot be encrypted without destroy+recreate; planned migration
 AWS-0176        # RDS IAM auth disabled — password auth sufficient for this project
 AWS-0177        # RDS deletion protection disabled — dev/staging only; prod has it enabled
 
