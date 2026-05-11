@@ -82,3 +82,9 @@ variable "log_retention_days" {
   type        = number
   default     = 14
 }
+
+variable "health_check_grace_period_seconds" {
+  description = "Seconds ECS waits before starting ALB health checks on new tasks. Must cover container startup + DB connection time."
+  type        = number
+  default     = 60
+}

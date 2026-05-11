@@ -136,7 +136,8 @@ resource "aws_ecs_service" "backend" {
   cluster         = aws_ecs_cluster.app.id
   launch_type     = "FARGATE"
   desired_count   = var.desired_count
-  task_definition = aws_ecs_task_definition.backend.arn
+  task_definition                    = aws_ecs_task_definition.backend.arn
+  health_check_grace_period_seconds  = var.health_check_grace_period_seconds
 
   network_configuration {
     subnets          = var.private_subnet_ids

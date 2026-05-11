@@ -154,6 +154,9 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: npm install
+      - name: Run tests with coverage
+        working-directory: backend
+        run: npm run test:coverage
       - name: SonarCloud analysis
         uses: SonarSource/sonarcloud-github-action@v3.1.0
         env:
@@ -364,8 +367,34 @@ jobs:
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
             --task-definition "$NEW_TASK_ARN"
-          aws ecs wait services-stable \
-            --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          MAX_WAIT=1200
+          ELAPSED=0
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            STATUS=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+              --query 'services[0].deployments[?status==`PRIMARY`].rolloutState' \
+              --output text)
+            echo "Deployment rollout: $STATUS (${ELAPSED}s / ${MAX_WAIT}s)"
+            if [ "$STATUS" = "COMPLETED" ]; then echo "Deployment succeeded."; break; fi
+            if [ "$STATUS" = "FAILED" ]; then
+              echo "Deployment FAILED. Stopped task diagnostics:"
+              STOPPED=$(aws ecs list-tasks --cluster "$ECS_CLUSTER" \
+                --service-name "$ECS_SERVICE" --desired-status STOPPED \
+                --max-items 3 --query 'taskArns[]' --output text)
+              [ -n "$STOPPED" ] && aws ecs describe-tasks \
+                --cluster "$ECS_CLUSTER" --tasks $STOPPED \
+                --query 'tasks[].{stopCode:stopCode,stoppedReason:stoppedReason,containers:containers[].{name:name,reason:reason,exitCode:exitCode}}'
+              exit 1
+            fi
+            sleep 30
+            ELAPSED=$((ELAPSED + 30))
+          done
+          if [ $ELAPSED -ge $MAX_WAIT ]; then
+            echo "Timed out after ${MAX_WAIT}s. Service state:"
+            aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+              --query 'services[0].{desired:desiredCount,running:runningCount,pending:pendingCount,deployments:deployments[].{status:status,rollout:rolloutState,desired:desiredCount,running:runningCount,failed:failedTasks}}'
+            exit 1
+          fi
 
       - name: Deploy frontend to S3
         env:
