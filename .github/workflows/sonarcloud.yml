@@ -6,8 +6,6 @@ name: SonarCloud — Code Quality
 
 on:
   workflow_dispatch:   # ← Manual "Run workflow" button in GitHub Actions tab
-  push:
-    branches: [main, staging, develop]
   pull_request:
     branches: [main, staging, develop]
 
