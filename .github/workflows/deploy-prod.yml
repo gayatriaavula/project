@@ -86,10 +86,16 @@ jobs:
       - name: Build and push Docker image to ECR
         id: push
         run: |
-          ECR_URL=$(aws ecr describe-repositories \
-            --repository-names "sample-app-${ENVIRONMENT}-backend" \
-            --query 'repositories[0].repositoryUri' --output text)
-          ECR_REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REPO="sample-app-${ENVIRONMENT}-backend"
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          ECR_URL="${ECR_REGISTRY}/${ECR_REPO}"
+          aws ecr describe-repositories --repository-names "${ECR_REPO}" \
+            --region "${AWS_REGION}" > /dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "${ECR_REPO}" \
+            --image-tag-mutability IMMUTABLE \
+            --image-scanning-configuration scanOnPush=true \
+            --region "${AWS_REGION}" > /dev/null
           aws ecr get-login-password --region "$AWS_REGION" | \
             docker login --username AWS --password-stdin "$ECR_REGISTRY"
           docker build -t sample-backend ./backend
@@ -225,10 +231,9 @@ jobs:
       - name: Pull image from ECR
         id: ecr_pull
         run: |
-          ECR_URL=$(aws ecr describe-repositories \
-            --repository-names "sample-app-${ENVIRONMENT}-backend" \
-            --query 'repositories[0].repositoryUri' --output text)
-          ECR_REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          ECR_URL="${ECR_REGISTRY}/sample-app-${ENVIRONMENT}-backend"
           aws ecr get-login-password --region "$AWS_REGION" | \
             docker login --username AWS --password-stdin "$ECR_REGISTRY"
           docker pull "$ECR_URL:${GITHUB_SHA}"
@@ -327,16 +332,8 @@ jobs:
           TF_FRONTEND_BUCKET: ${{ steps.tf_outputs.outputs.frontend_bucket }}
           TF_FRONTEND_URL:    ${{ steps.tf_outputs.outputs.frontend_url }}
         run: |
-          ECR_URL="${{ needs.build.outputs.ecr_url }}"
-          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
-            ECR_URL=$(aws ecr describe-repositories \
-              --repository-names "sample-app-${ENVIRONMENT}-backend" \
-              --query 'repositories[0].repositoryUri' --output text)
-          fi
-          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
-            echo "ERROR: Could not resolve ECR URL for sample-app-${ENVIRONMENT}-backend" >&2
-            exit 1
-          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/sample-app-${ENVIRONMENT}-backend"
           ECS_CLUSTER=${TF_ECS_CLUSTER:-sample-app-${ENVIRONMENT}-cluster}
           ECS_SERVICE=${TF_ECS_SERVICE:-sample-app-${ENVIRONMENT}-backend-service}
           BACKEND_URL=${TF_BACKEND_URL:-$(aws elbv2 describe-load-balancers \
