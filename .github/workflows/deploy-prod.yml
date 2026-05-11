@@ -328,6 +328,15 @@ jobs:
           TF_FRONTEND_URL:    ${{ steps.tf_outputs.outputs.frontend_url }}
         run: |
           ECR_URL="${{ needs.build.outputs.ecr_url }}"
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
+            ECR_URL=$(aws ecr describe-repositories \
+              --repository-names "sample-app-${ENVIRONMENT}-backend" \
+              --query 'repositories[0].repositoryUri' --output text)
+          fi
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
+            echo "ERROR: Could not resolve ECR URL for sample-app-${ENVIRONMENT}-backend" >&2
+            exit 1
+          fi
           ECS_CLUSTER=${TF_ECS_CLUSTER:-sample-app-${ENVIRONMENT}-cluster}
           ECS_SERVICE=${TF_ECS_SERVICE:-sample-app-${ENVIRONMENT}-backend-service}
           BACKEND_URL=${TF_BACKEND_URL:-$(aws elbv2 describe-load-balancers \
