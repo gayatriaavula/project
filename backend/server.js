@@ -2,6 +2,7 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 
 const app = express();
+app.disable('x-powered-by');
 const port = process.env.PORT || 3000;
 
 if (!process.env.DB_PASSWORD) {
@@ -14,7 +15,7 @@ const dbConfig = {
   user: process.env.DB_USER || 'appuser',
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || 'sampledb',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
+  port: Number.parseInt(process.env.DB_PORT || '3306', 10),
   waitForConnections: true,
   connectionLimit: 5,
 };
