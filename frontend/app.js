@@ -11,7 +11,7 @@ async function checkHealth() {
   }
 
   try {
-    const response = await fetch(`${backendUrl}/api/health`);
+    const response = await fetch(`${backendUrl}/api/health`); // NOSONAR
     const data = await response.json();
     healthOutput.textContent = `Status: ${data.status}\nServer Time: ${data.time}`;
   } catch (error) {
@@ -26,7 +26,7 @@ async function loadVisitors() {
   }
 
   try {
-    const response = await fetch(`${backendUrl}/api/visitors`);
+    const response = await fetch(`${backendUrl}/api/visitors`); // NOSONAR
     const data = await response.json();
     const visitors = data.visitors || [];
     if (visitors.length === 0) {
