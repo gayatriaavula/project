@@ -207,17 +207,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      - name: Log in to ECR
+      - name: Pull image from ECR
+        id: ecr_pull
         run: |
-          ECR_REGISTRY=$(echo "${{ needs.build.outputs.ecr_url }}" | cut -d'/' -f1)
+          ECR_URL=$(aws ecr describe-repositories \
+            --repository-names "sample-app-${ENVIRONMENT}-backend" \
+            --query 'repositories[0].repositoryUri' --output text)
+          ECR_REGISTRY=$(echo "$ECR_URL" | cut -d'/' -f1)
           aws ecr get-login-password --region "$AWS_REGION" | \
             docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          docker pull "$ECR_URL:${GITHUB_SHA}"
+          echo "image_ref=$ECR_URL:${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
       - name: Trivy — Container Image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: ${{ needs.build.outputs.ecr_url }}:${{ github.sha }}
+          image-ref: ${{ steps.ecr_pull.outputs.image_ref }}
           format: sarif
           output: trivy-image.sarif
           severity: CRITICAL,HIGH
