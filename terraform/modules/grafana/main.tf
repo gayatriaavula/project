@@ -49,7 +49,14 @@ resource "aws_security_group" "monitoring_tasks" {
     from_port       = 9090
     to_port         = 9090
     protocol        = "tcp"
-    security_groups = [aws_security_group.monitoring_alb.id, aws_security_group.monitoring_tasks.id]
+    security_groups = [aws_security_group.monitoring_alb.id]
+  }
+
+  ingress {
+    from_port = 9090
+    to_port   = 9090
+    protocol  = "tcp"
+    self      = true
   }
 
   egress {
