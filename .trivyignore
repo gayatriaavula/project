@@ -70,3 +70,9 @@ AVD-AWS-0057    # IAM policy allows action on all resources — required by Clou
 # The monitoring ALB (Grafana/Prometheus) is internet-facing over HTTP by design.
 # Covered by existing AWS-0053 / AWS-0054 entries; additional SG-level findings below.
 AVD-AWS-0107    # Security group unrestricted ingress — monitoring ALB port 80 from internet (by design)
+
+# ── Grafana ECS task — admin password via environment variable ─────────────────
+# GF_SECURITY_ADMIN_PASSWORD is passed as an ECS environment variable.
+# Proper fix would be Secrets Manager; acceptable for this project since the
+# value comes from a GitHub Secret (TF_VAR_grafana_admin_password) not hardcoded.
+AVD-AWS-0036    # Plaintext secret in ECS task environment — Grafana admin password from secret store

@@ -205,6 +205,7 @@ jobs:
           category: trivy-filesystem
 
       - name: Trivy — IaC (Terraform)
+        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
