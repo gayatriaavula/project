@@ -194,11 +194,11 @@ resource "aws_cloudwatch_dashboard" "main" {
     widgets = [
       {
         type   = "text"
-        x      = 0; y = 0; width = 24; height = 1
+        x      = 0, y = 0, width = 24, height = 1
         properties = { markdown = "# ${upper(var.environment)} — ${var.app_name}" }
       },
       {
-        type = "metric"; x = 0; y = 1; width = 8; height = 6
+        type = "metric", x = 0, y = 1, width = 8, height = 6
         properties = {
           title   = "ECS — CPU Utilization (%)"
           region  = var.aws_region
@@ -211,7 +211,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 8; y = 1; width = 8; height = 6
+        type = "metric", x = 8, y = 1, width = 8, height = 6
         properties = {
           title   = "ECS — Memory Utilization (%)"
           region  = var.aws_region
@@ -224,7 +224,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 16; y = 1; width = 8; height = 6
+        type = "metric", x = 16, y = 1, width = 8, height = 6
         properties = {
           title   = "ECS — Running Tasks"
           region  = var.aws_region
@@ -236,7 +236,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 0; y = 7; width = 8; height = 6
+        type = "metric", x = 0, y = 7, width = 8, height = 6
         properties = {
           title   = "ALB — Request Count"
           region  = var.aws_region
@@ -247,7 +247,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 8; y = 7; width = 8; height = 6
+        type = "metric", x = 8, y = 7, width = 8, height = 6
         properties = {
           title   = "ALB — HTTP 5xx Errors"
           region  = var.aws_region
@@ -262,7 +262,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 16; y = 7; width = 8; height = 6
+        type = "metric", x = 16, y = 7, width = 8, height = 6
         properties = {
           title   = "ALB — Target Response Time (s)"
           region  = var.aws_region
@@ -274,7 +274,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 0; y = 13; width = 8; height = 6
+        type = "metric", x = 0, y = 13, width = 8, height = 6
         properties = {
           title   = "RDS — CPU Utilization (%)"
           region  = var.aws_region
@@ -287,7 +287,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 8; y = 13; width = 8; height = 6
+        type = "metric", x = 8, y = 13, width = 8, height = 6
         properties = {
           title   = "RDS — Database Connections"
           region  = var.aws_region
@@ -299,7 +299,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         }
       },
       {
-        type = "metric"; x = 16; y = 13; width = 8; height = 6
+        type = "metric", x = 16, y = 13, width = 8, height = 6
         properties = {
           title   = "RDS — Free Storage Space (GB)"
           region  = var.aws_region

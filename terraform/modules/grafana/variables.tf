@@ -12,4 +12,7 @@ variable "grafana_admin_password" {
   type        = string
   sensitive   = true
 }
-variable "log_retention_days" { type = number; default = 14 }
+variable "log_retention_days" {
+  type    = number
+  default = 14
+}
