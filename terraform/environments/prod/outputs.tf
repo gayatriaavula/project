@@ -37,3 +37,18 @@ output "cloudwatch_log_group" {
   description = "CloudWatch log group for the backend service"
   value       = module.ecs.cloudwatch_log_group
 }
+
+output "grafana_url" {
+  description = "Grafana dashboard URL"
+  value       = module.grafana.grafana_url
+}
+
+output "prometheus_url" {
+  description = "Prometheus URL"
+  value       = module.grafana.prometheus_url
+}
+
+output "monitoring_dashboard_url" {
+  description = "CloudWatch monitoring dashboard URL"
+  value       = module.monitoring.dashboard_url
+}

@@ -27,3 +27,16 @@ variable "db_name" {
   type        = string
   default     = "sampledb"
 }
+
+variable "alarm_email" {
+  description = "Email for CloudWatch alarm notifications (leave empty to disable)"
+  type        = string
+  default     = ""
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password"
+  type        = string
+  sensitive   = true
+  default     = "admin"
+}

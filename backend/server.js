@@ -1,10 +1,44 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
+const promClient = require('prom-client');
+
+const registry = new promClient.Registry();
+promClient.collectDefaultMetrics({ register: registry });
+
+const httpRequestDuration = new promClient.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'HTTP request duration in seconds',
+  labelNames: ['method', 'route', 'status_code'],
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
+  registers: [registry],
+});
+
+const httpRequestTotal = new promClient.Counter({
+  name: 'http_requests_total',
+  help: 'Total number of HTTP requests',
+  labelNames: ['method', 'route', 'status_code'],
+  registers: [registry],
+});
 
 function createApp(db) {
   const app = express();
   app.disable('x-powered-by');
   app.locals.db = db;
+
+  app.use((req, res, next) => {
+    const end = httpRequestDuration.startTimer();
+    res.on('finish', () => {
+      const route = req.route ? req.route.path : req.path;
+      end({ method: req.method, route, status_code: res.statusCode });
+      httpRequestTotal.inc({ method: req.method, route, status_code: res.statusCode });
+    });
+    next();
+  });
+
+  app.get('/metrics', async (req, res) => {
+    res.set('Content-Type', registry.contentType);
+    res.send(await registry.metrics());
+  });
 
   app.get('/api/health', async (req, res) => {
     try {

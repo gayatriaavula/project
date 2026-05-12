@@ -22,3 +22,18 @@ output "cloudwatch_log_group" {
   description = "CloudWatch log group for the backend service"
   value       = aws_cloudwatch_log_group.backend.name
 }
+
+output "ecs_cluster_id" {
+  description = "ECS cluster ID"
+  value       = aws_ecs_cluster.app.id
+}
+
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix for CloudWatch metrics"
+  value       = aws_lb.app.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  description = "Target group ARN suffix for CloudWatch metrics"
+  value       = aws_lb_target_group.backend.arn_suffix
+}

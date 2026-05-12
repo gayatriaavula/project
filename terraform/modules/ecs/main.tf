@@ -87,6 +87,10 @@ resource "aws_lb_listener" "http" {
 
 resource "aws_ecs_cluster" "app" {
   name = "${var.app_name}-${var.environment}-cluster"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
   tags = {
     Environment = var.environment
   }
