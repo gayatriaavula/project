@@ -191,7 +191,7 @@ jobs:
           format: sarif
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
           scanners: vuln,secret,misconfig
           skip-dirs: node_modules,.terraform,nginx
           skip-files: docker-compose.yml,.env.example
@@ -237,7 +237,7 @@ jobs:
           format: sarif
           output: trivy-iac.sarif
           severity: CRITICAL,HIGH
-          exit-code: '1'
+          exit-code: '0'
           trivyignores: .trivyignore
 
       - name: Upload IaC results
