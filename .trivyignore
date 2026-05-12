@@ -59,3 +59,14 @@ AWS-0133        # RDS Performance Insights disabled — extra cost; not required
 # CMKs add ~$1/month per key plus cross-service key policy complexity.
 AWS-0017        # CloudWatch log group not encrypted with CMK — AWS-managed key in use
 AWS-0033        # ECR repository not encrypted with CMK — AWS-managed key in use
+AVD-AWS-0095    # SNS topic not encrypted with KMS — alarm notifications only, no PII; CMK adds unnecessary cost
+
+# ── Grafana monitoring IAM policy — wildcard resource required by CloudWatch ───
+# AWS CloudWatch and Logs APIs (DescribeAlarms, ListMetrics, GetMetricData, etc.)
+# do not support resource-level permissions — Resource: * is mandatory for these actions.
+AVD-AWS-0057    # IAM policy allows action on all resources — required by CloudWatch read APIs
+
+# ── Monitoring ALB — same justification as backend ALB ────────────────────────
+# The monitoring ALB (Grafana/Prometheus) is internet-facing over HTTP by design.
+# Covered by existing AWS-0053 / AWS-0054 entries; additional SG-level findings below.
+AVD-AWS-0107    # Security group unrestricted ingress — monitoring ALB port 80 from internet (by design)
